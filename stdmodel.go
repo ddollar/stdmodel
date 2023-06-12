@@ -25,6 +25,11 @@ func New(db orm.DB) (*Models, error) {
 	return m, nil
 }
 
+func QueryString(q *orm.Query) string {
+	s, _ := q.AppendQuery(orm.NewFormatter(), nil)
+	return string(s)
+}
+
 func (m *Models) Create(v any) error {
 	if _, err := m.db.Model(v).Insert(); err != nil {
 		return errors.WithStack(err)
@@ -73,7 +78,7 @@ func (m *Models) Get(v any) error {
 	return nil
 }
 
-func (m *Models) List(vs any) error {
+func (m *Models) List(vs any, args any) error {
 	q := m.db.Model(vs)
 
 	if reflect.TypeOf(vs).Kind() != reflect.Ptr || reflect.TypeOf(vs).Elem().Kind() != reflect.Slice {
@@ -84,6 +89,10 @@ func (m *Models) List(vs any) error {
 
 	if qd, ok := v.(QueryDefaulter); ok {
 		q = qd.QueryDefault(q)
+	}
+
+	if err := queryArgs(q, args); err != nil {
+		return errors.WithStack(err)
 	}
 
 	if err := q.Select(); err != nil {
@@ -185,7 +194,6 @@ func queryArgs(q *orm.Query, args any) error {
 	switch argsv.Kind() {
 	case reflect.Invalid:
 	case reflect.Struct:
-
 		for i := 0; i < argsv.NumField(); i++ {
 			if argsv.Field(i).IsNil() {
 				continue
