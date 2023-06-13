@@ -96,15 +96,11 @@ func (m *Models) Get(v any) error {
 }
 
 func (m *Models) List(vs any, args any) error {
-	if reflect.TypeOf(vs).Kind() != reflect.Ptr {
-		panic("pointer expected")
-	}
-
-	q := m.db.Model(vs)
-
 	if reflect.TypeOf(vs).Kind() != reflect.Ptr || reflect.TypeOf(vs).Elem().Kind() != reflect.Slice {
 		return errors.Errorf("pointer to slice expected")
 	}
+
+	q := m.db.Model(vs)
 
 	v := reflect.New(reflect.TypeOf(vs).Elem()).Interface()
 
@@ -130,9 +126,7 @@ func (m *Models) Query(v any) *orm.Query {
 
 	q := m.db.Model(v)
 
-	ve := reflect.New(reflect.TypeOf(v)).Elem().Interface()
-
-	if qd, ok := ve.(QueryDefaulter); ok {
+	if qd, ok := v.(QueryDefaulter); ok {
 		q = qd.QueryDefault(q)
 	}
 
@@ -231,7 +225,7 @@ func queryArgs(q *orm.Query, args any) error {
 	case reflect.Invalid:
 	case reflect.Struct:
 		for i := 0; i < argsv.NumField(); i++ {
-			if argsv.Field(i).IsNil() {
+			if argsv.Field(i).Type().Kind() == reflect.Ptr && argsv.Field(i).IsNil() {
 				continue
 			}
 
