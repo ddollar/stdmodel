@@ -103,7 +103,13 @@ func (m *Models) List(vs any, args any) error {
 }
 
 func (m *Models) Query(v any) *orm.Query {
-	return m.db.Model(v)
+	q := m.db.Model(v)
+
+	if qd, ok := v.(QueryDefaulter); ok {
+		q = qd.QueryDefault(q)
+	}
+
+	return q
 }
 
 func (m *Models) Save(v any, columns ...string) error {
