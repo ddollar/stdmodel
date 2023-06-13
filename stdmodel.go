@@ -105,7 +105,9 @@ func (m *Models) List(vs any, args any) error {
 func (m *Models) Query(v any) *orm.Query {
 	q := m.db.Model(v)
 
-	if qd, ok := v.(QueryDefaulter); ok {
+	ve := reflect.New(reflect.TypeOf(v)).Elem().Interface()
+
+	if qd, ok := ve.(QueryDefaulter); ok {
 		q = qd.QueryDefault(q)
 	}
 
