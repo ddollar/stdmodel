@@ -31,6 +31,10 @@ func QueryString(q *orm.Query) string {
 }
 
 func (m *Models) Create(v any) error {
+	if reflect.TypeOf(v).Kind() != reflect.Ptr {
+		panic("pointer expected")
+	}
+
 	if _, err := m.db.Model(v).Insert(); err != nil {
 		return errors.WithStack(err)
 	}
@@ -39,6 +43,10 @@ func (m *Models) Create(v any) error {
 }
 
 func (m *Models) Delete(v any) error {
+	if reflect.TypeOf(v).Kind() != reflect.Ptr {
+		panic("pointer expected")
+	}
+
 	if _, err := m.db.Model(v).WherePK().Delete(); err != nil {
 		return errors.WithStack(err)
 	}
@@ -47,8 +55,13 @@ func (m *Models) Delete(v any) error {
 }
 
 func (m *Models) Find(v, args any) error {
+	if reflect.TypeOf(v).Kind() != reflect.Ptr {
+		panic("pointer expected")
+	}
+
 	q := m.db.Model(v)
 
+	q = withQueryDefaults(q, v)
 	if qd, ok := v.(QueryDefaulter); ok {
 		q = qd.QueryDefault(q)
 	}
@@ -65,6 +78,10 @@ func (m *Models) Find(v, args any) error {
 }
 
 func (m *Models) Get(v any) error {
+	if reflect.TypeOf(v).Kind() != reflect.Ptr {
+		panic("pointer expected")
+	}
+
 	q := m.db.Model(v)
 
 	if qd, ok := v.(QueryDefaulter); ok {
@@ -79,6 +96,10 @@ func (m *Models) Get(v any) error {
 }
 
 func (m *Models) List(vs any, args any) error {
+	if reflect.TypeOf(vs).Kind() != reflect.Ptr {
+		panic("pointer expected")
+	}
+
 	q := m.db.Model(vs)
 
 	if reflect.TypeOf(vs).Kind() != reflect.Ptr || reflect.TypeOf(vs).Elem().Kind() != reflect.Slice {
@@ -103,6 +124,10 @@ func (m *Models) List(vs any, args any) error {
 }
 
 func (m *Models) Query(v any) *orm.Query {
+	if reflect.TypeOf(v).Kind() != reflect.Ptr {
+		panic("pointer expected")
+	}
+
 	q := m.db.Model(v)
 
 	ve := reflect.New(reflect.TypeOf(v)).Elem().Interface()
@@ -115,6 +140,9 @@ func (m *Models) Query(v any) *orm.Query {
 }
 
 func (m *Models) Save(v any, columns ...string) error {
+	if reflect.TypeOf(v).Kind() != reflect.Ptr {
+		panic("pointer expected")
+	}
 	var md *orm.Query
 
 	switch t := v.(type) {
@@ -216,4 +244,14 @@ func queryArgs(q *orm.Query, args any) error {
 	}
 
 	return nil
+}
+
+func withQueryDefaults(q *orm.Query, v any) *orm.Query {
+	ve := reflect.New(reflect.TypeOf(v)).Elem().Interface()
+
+	if qd, ok := ve.(QueryDefaulter); ok {
+		q = qd.QueryDefault(q)
+	}
+
+	return q
 }
