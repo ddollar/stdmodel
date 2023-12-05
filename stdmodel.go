@@ -38,7 +38,7 @@ func (m *Models) Create(ctx context.Context, v any) error {
 		panic("pointer expected")
 	}
 
-	if _, err := m.db.NewInsert().Model(v).Exec(ctx); err != nil {
+	if err := m.db.NewInsert().Model(v).Scan(ctx); err != nil {
 		return errors.WithStack(err)
 	}
 
@@ -73,7 +73,7 @@ func (m *Models) Find(ctx context.Context, v, args any) error {
 		return errors.WithStack(err)
 	}
 
-	if _, err := q.Exec(ctx); err != nil {
+	if err := q.Scan(ctx); err != nil {
 		return errors.WithStack(err)
 	}
 
@@ -91,7 +91,7 @@ func (m *Models) Get(ctx context.Context, v any) error {
 		q = qd.QueryDefault(q)
 	}
 
-	if _, err := q.WherePK().Exec(ctx); err != nil {
+	if err := q.WherePK().Scan(ctx); err != nil {
 		return errors.WithStack(err)
 	}
 
@@ -115,7 +115,7 @@ func (m *Models) List(ctx context.Context, vs any, args any) error {
 		return errors.WithStack(err)
 	}
 
-	if _, err := q.Exec(ctx); err != nil {
+	if err := q.Scan(ctx); err != nil {
 		return errors.WithStack(err)
 	}
 
@@ -145,7 +145,7 @@ func (m *Models) Save(ctx context.Context, v any, columns ...string) error {
 		md = md.Set(fmt.Sprintf("%q = EXCLUDED.%q", column, column))
 	}
 
-	if _, err := md.Exec(ctx); err != nil {
+	if err := md.Scan(ctx); err != nil {
 		return errors.WithStack(err)
 	}
 
