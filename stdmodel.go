@@ -6,7 +6,6 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/go-pg/pg/v10/orm"
 	"github.com/pkg/errors"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/schema"
@@ -26,11 +25,6 @@ func New(db *bun.DB) (*Models, error) {
 	}
 
 	return m, nil
-}
-
-func QueryString(q *orm.Query) string {
-	s, _ := q.AppendQuery(orm.NewFormatter(), nil)
-	return string(s)
 }
 
 func (m *Models) Create(ctx context.Context, v any) error {
