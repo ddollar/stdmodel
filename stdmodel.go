@@ -1,23 +1,26 @@
 package stdmodel
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 	"strings"
 
 	"github.com/go-pg/pg/v10/orm"
 	"github.com/pkg/errors"
+	"github.com/uptrace/bun"
+	"github.com/uptrace/bun/schema"
 )
 
 type Models struct {
-	db orm.DB
+	db *bun.DB
 }
 
 type QueryDefaulter interface {
-	QueryDefault(*orm.Query) *orm.Query
+	QueryDefault(*bun.SelectQuery) *bun.SelectQuery
 }
 
-func New(db orm.DB) (*Models, error) {
+func New(db *bun.DB) (*Models, error) {
 	m := &Models{
 		db: db,
 	}
@@ -30,36 +33,36 @@ func QueryString(q *orm.Query) string {
 	return string(s)
 }
 
-func (m *Models) Create(v any) error {
+func (m *Models) Create(ctx context.Context, v any) error {
 	if reflect.TypeOf(v).Kind() != reflect.Ptr {
 		panic("pointer expected")
 	}
 
-	if _, err := m.db.Model(v).Insert(); err != nil {
+	if _, err := m.db.NewInsert().Model(v).Exec(ctx); err != nil {
 		return errors.WithStack(err)
 	}
 
 	return nil
 }
 
-func (m *Models) Delete(v any) error {
+func (m *Models) Delete(ctx context.Context, v any) error {
 	if reflect.TypeOf(v).Kind() != reflect.Ptr {
 		panic("pointer expected")
 	}
 
-	if _, err := m.db.Model(v).WherePK().Delete(); err != nil {
+	if _, err := m.db.NewDelete().Model(v).WherePK().Exec(ctx); err != nil {
 		return errors.WithStack(err)
 	}
 
 	return nil
 }
 
-func (m *Models) Find(v, args any) error {
+func (m *Models) Find(ctx context.Context, v, args any) error {
 	if reflect.TypeOf(v).Kind() != reflect.Ptr {
 		panic("pointer expected")
 	}
 
-	q := m.db.Model(v)
+	q := m.db.NewSelect().Model(v)
 
 	q = withQueryDefaults(q, v)
 	if qd, ok := v.(QueryDefaulter); ok {
@@ -70,37 +73,37 @@ func (m *Models) Find(v, args any) error {
 		return errors.WithStack(err)
 	}
 
-	if err := q.Select(); err != nil {
+	if _, err := q.Exec(ctx); err != nil {
 		return errors.WithStack(err)
 	}
 
 	return nil
 }
 
-func (m *Models) Get(v any) error {
+func (m *Models) Get(ctx context.Context, v any) error {
 	if reflect.TypeOf(v).Kind() != reflect.Ptr {
 		panic("pointer expected")
 	}
 
-	q := m.db.Model(v)
+	q := m.db.NewSelect().Model(v)
 
 	if qd, ok := v.(QueryDefaulter); ok {
 		q = qd.QueryDefault(q)
 	}
 
-	if err := q.WherePK().Select(); err != nil {
+	if _, err := q.WherePK().Exec(ctx); err != nil {
 		return errors.WithStack(err)
 	}
 
 	return nil
 }
 
-func (m *Models) List(vs any, args any) error {
+func (m *Models) List(ctx context.Context, vs any, args any) error {
 	if reflect.TypeOf(vs).Kind() != reflect.Ptr || reflect.TypeOf(vs).Elem().Kind() != reflect.Slice {
 		return errors.Errorf("pointer to slice expected")
 	}
 
-	q := m.db.Model(vs)
+	q := m.db.NewSelect().Model(vs)
 
 	v := reflect.New(reflect.TypeOf(vs).Elem()).Interface()
 
@@ -112,47 +115,27 @@ func (m *Models) List(vs any, args any) error {
 		return errors.WithStack(err)
 	}
 
-	if err := q.Select(); err != nil {
+	if _, err := q.Exec(ctx); err != nil {
 		return errors.WithStack(err)
 	}
 
 	return nil
 }
 
-func (m *Models) Query(v any) *orm.Query {
+func (m *Models) Save(ctx context.Context, v any, columns ...string) error {
 	if reflect.TypeOf(v).Kind() != reflect.Ptr {
 		panic("pointer expected")
 	}
-
-	q := m.db.Model(v)
-
-	if qd, ok := v.(QueryDefaulter); ok {
-		q = qd.QueryDefault(q)
-	}
-
-	return q
-}
-
-func (m *Models) Save(v any, columns ...string) error {
-	if reflect.TypeOf(v).Kind() != reflect.Ptr {
-		panic("pointer expected")
-	}
-	var md *orm.Query
+	var md *bun.InsertQuery
 
 	switch t := v.(type) {
-	case *orm.Query:
+	case *bun.InsertQuery:
 		md = t
 	default:
-		md = m.db.Model(t)
+		md = m.db.NewInsert().Model(t)
 	}
 
-	pks := []string{}
-
-	for _, pk := range md.TableModel().Table().PKs {
-		pks = append(pks, string(pk.Column))
-	}
-
-	md = md.OnConflict(fmt.Sprintf("(%s) DO UPDATE", strings.Join(pks, ",")))
+	md = md.On("CONFLICT (?TablePKs) DO UPDATE")
 
 	if ups := m.updateColumns(v); ups != "" {
 		md = md.Set(ups)
@@ -162,23 +145,37 @@ func (m *Models) Save(v any, columns ...string) error {
 		md = md.Set(fmt.Sprintf("%q = EXCLUDED.%q", column, column))
 	}
 
-	if _, err := md.Insert(); err != nil {
+	if _, err := md.Exec(ctx); err != nil {
 		return errors.WithStack(err)
 	}
 
 	return nil
 }
 
+func (m *Models) Select(v any) *bun.SelectQuery {
+	if reflect.TypeOf(v).Kind() != reflect.Ptr {
+		panic("pointer expected")
+	}
+
+	q := m.db.NewSelect().Model(v)
+
+	if qd, ok := v.(QueryDefaulter); ok {
+		q = qd.QueryDefault(q)
+	}
+
+	return q
+}
+
 func (m *Models) updateColumns(v interface{}, additional ...string) string {
-	updates := map[string]bool{}
+	updates := map[schema.Safe]bool{}
 
 	for _, a := range additional {
-		updates[a] = true
+		updates[bun.Safe(a)] = true
 	}
 
 	for field, attrs := range modelTags(v) {
 		if attrs["update"] {
-			for _, f := range m.db.Model(v).TableModel().Table().Fields {
+			for _, f := range m.db.Dialect().Tables().Get(reflect.TypeOf(v)).Fields {
 				if f.GoName == field {
 					updates[f.SQLName] = true
 				}
@@ -217,7 +214,7 @@ func modelTags(v interface{}) map[string]map[string]bool {
 	return tags
 }
 
-func queryArgs(q *orm.Query, args any) error {
+func queryArgs(q *bun.SelectQuery, args any) error {
 	argsv := reflect.ValueOf(args)
 	argst := reflect.TypeOf(args)
 
@@ -240,7 +237,7 @@ func queryArgs(q *orm.Query, args any) error {
 	return nil
 }
 
-func withQueryDefaults(q *orm.Query, v any) *orm.Query {
+func withQueryDefaults(q *bun.SelectQuery, v any) *bun.SelectQuery {
 	ve := reflect.New(reflect.TypeOf(v)).Elem().Interface()
 
 	if qd, ok := ve.(QueryDefaulter); ok {
