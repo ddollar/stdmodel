@@ -129,7 +129,7 @@ func (m *Models) Save(ctx context.Context, v any, columns ...string) error {
 		md = m.db.NewInsert().Model(t)
 	}
 
-	md = md.On("CONFLICT (?TablePKs) DO UPDATE")
+	md = md.On("CONFLICT (?PKs) DO UPDATE")
 
 	if ups := m.updateColumns(v); ups != "" {
 		md = md.Set(ups)
@@ -139,7 +139,7 @@ func (m *Models) Save(ctx context.Context, v any, columns ...string) error {
 		md = md.Set(fmt.Sprintf("%q = EXCLUDED.%q", column, column))
 	}
 
-	if err := md.Scan(ctx); err != nil {
+	if _, err := md.Exec(ctx); err != nil {
 		return errors.WithStack(err)
 	}
 
