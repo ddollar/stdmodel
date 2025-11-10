@@ -1,4 +1,4 @@
-module github.com/ddollar/stdmodel
+module go.ddollar.dev/stdmodel
 
 go 1.20
 
