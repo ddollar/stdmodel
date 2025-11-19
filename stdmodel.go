@@ -10,6 +10,9 @@ import (
 
 	"github.com/pkg/errors"
 	"github.com/uptrace/bun"
+	"github.com/uptrace/bun/dialect/mysqldialect"
+	"github.com/uptrace/bun/dialect/pgdialect"
+	"github.com/uptrace/bun/dialect/sqlitedialect"
 	"github.com/uptrace/bun/schema"
 )
 
@@ -200,8 +203,10 @@ func (m *Models) List(ctx context.Context, vs any, args any) error {
 	return nil
 }
 
-// Save performs an upsert operation (INSERT ... ON CONFLICT DO UPDATE).
-// If a record with the same primary key exists, it updates; otherwise it inserts.
+// Save performs an upsert operation (INSERT with conflict handling).
+// For PostgreSQL and SQLite: uses ON CONFLICT DO UPDATE
+// For MySQL: uses ON DUPLICATE KEY UPDATE
+// For other databases: performs a simple INSERT (will fail if record exists)
 //
 // Fields marked with `model:"update"` tag are automatically updated on conflict.
 // Additional columns to update can be specified via the columns parameter.
@@ -234,14 +239,35 @@ func (m *Models) Save(ctx context.Context, v any, columns ...string) error {
 		md = m.db.NewInsert().Model(t)
 	}
 
-	md = md.On("CONFLICT (?PKs) DO UPDATE")
+	// Only use conflict handling for databases that support it
+	dialect := m.db.Dialect()
 
-	if ups := m.updateColumns(v); ups != "" {
-		md = md.Set(ups)
-	}
+	switch dialect.(type) {
+	case *pgdialect.Dialect, *sqlitedialect.Dialect:
+		// PostgreSQL and SQLite use ON CONFLICT
+		md = md.On("CONFLICT (?PKs) DO UPDATE")
 
-	for _, column := range columns {
-		md = md.Set(fmt.Sprintf("%q = EXCLUDED.%q", column, column))
+		// Collect all columns that should be updated
+		updateCols := m.collectUpdateColumns(v, columns...)
+
+		// Set each column using proper Bun API
+		for _, col := range updateCols {
+			md = md.Set("? = EXCLUDED.?", bun.Ident(col), bun.Ident(col))
+		}
+
+	case *mysqldialect.Dialect:
+		// MySQL uses ON DUPLICATE KEY UPDATE
+		md = md.On("DUPLICATE KEY UPDATE")
+
+		updateCols := m.collectUpdateColumns(v, columns...)
+
+		for _, col := range updateCols {
+			md = md.Set("? = VALUES(?)", bun.Ident(col), bun.Ident(col))
+		}
+
+	default:
+		// For other databases, just do a regular insert
+		// This will fail with a constraint violation if the record exists
 	}
 
 	if _, err := md.Exec(ctx); err != nil {
@@ -279,6 +305,38 @@ func (m *Models) Select(v any) *bun.SelectQuery {
 	return q
 }
 
+// collectUpdateColumns returns a list of column names that should be updated.
+// It combines columns from model:"update" tags and additional specified columns.
+func (m *Models) collectUpdateColumns(v interface{}, additional ...string) []string {
+	columnSet := make(map[string]bool)
+
+	// Add explicitly specified columns
+	for _, col := range additional {
+		columnSet[col] = true
+	}
+
+	// Add columns from model tags
+	for field, attrs := range modelTags(v) {
+		if attrs["update"] {
+			for _, f := range m.db.Dialect().Tables().Get(reflect.TypeOf(v)).Fields {
+				if f.GoName == field {
+					columnSet[f.Name] = true
+				}
+			}
+		}
+	}
+
+	// Convert to slice
+	columns := make([]string, 0, len(columnSet))
+	for col := range columnSet {
+		columns = append(columns, col)
+	}
+
+	return columns
+}
+
+// updateColumns is deprecated but kept for backwards compatibility.
+// Use collectUpdateColumns instead.
 func (m *Models) updateColumns(v interface{}, additional ...string) string {
 	updates := map[schema.Safe]bool{}
 

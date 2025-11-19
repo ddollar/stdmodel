@@ -1,13 +1,14 @@
 # stdmodel
 
-A lightweight database abstraction layer built on top of [Bun ORM](https://github.com/uptrace/bun) providing a clean, opinionated API for common CRUD operations with PostgreSQL databases.
+A lightweight database abstraction layer built on top of [Bun ORM](https://github.com/uptrace/bun) providing a clean, opinionated API for common CRUD operations with SQL databases.
 
 ## Features
 
 - **Simple CRUD operations**: Create, Read, Update, Delete with minimal boilerplate
+- **Database-agnostic upserts**: `Save()` works with PostgreSQL, MySQL, and SQLite
 - **Query defaults**: Implement `QueryDefaulter` interface for patterns like soft deletes or tenant isolation
 - **Flexible filtering**: Use struct tags to define filters declaratively
-- **Smart upserts**: `Save()` method with automatic field detection via `model` tags
+- **Smart upserts**: Automatic field detection via `model:"update"` tags
 - **Type-safe**: All methods use Go generics and reflection for type safety
 - **Error wrapping**: Errors include stack traces via `github.com/pkg/errors`
 
@@ -133,7 +134,12 @@ err := models.List(ctx, &users, UserFilter{Status: "active"})
 
 ### Save (Upsert)
 
-Insert or update on conflict. Use `model:"update"` tags to automatically update fields:
+Insert or update on conflict. Works with PostgreSQL, MySQL, and SQLite:
+- **PostgreSQL & SQLite**: Uses `ON CONFLICT DO UPDATE`
+- **MySQL**: Uses `ON DUPLICATE KEY UPDATE`
+- **Other databases**: Performs regular INSERT (will error if record exists)
+
+Use `model:"update"` tags to automatically update fields on conflict:
 
 ```go
 type User struct {
@@ -145,16 +151,17 @@ type User struct {
 
 user := &User{
     ID:        123,
-    Name:      "Alice Updated",
+    Name:      "Alice",
     UpdatedAt: time.Now(),
 }
 err := models.Save(ctx, user)
-// On conflict, UpdatedAt will be updated automatically
+// On conflict, only UpdatedAt will be updated (has model:"update" tag)
 ```
 
 **Specify additional columns to update:**
 
 ```go
+// Update name and email in addition to fields with model:"update" tags
 err := models.Save(ctx, user, "name", "email")
 ```
 
@@ -252,7 +259,7 @@ if err != nil {
 
 ## Testing
 
-The project includes comprehensive tests with 54%+ coverage. Run tests with:
+The project includes comprehensive tests with 77%+ coverage. Run tests with:
 
 ```bash
 go test
@@ -260,7 +267,13 @@ go test -v          # verbose
 go test -cover      # with coverage
 ```
 
-Tests use in-memory SQLite for fast, isolated testing.
+Tests use in-memory SQLite for fast, isolated testing. The test suite validates:
+- All CRUD operations (Create, Get, Find, List, Delete, Save)
+- QueryDefaulter interface behavior
+- Model tag parsing and application
+- Query argument filtering
+- Database-agnostic upsert functionality
+- Error handling and panic conditions
 
 ## Panics vs Errors
 

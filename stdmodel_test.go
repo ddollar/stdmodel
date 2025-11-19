@@ -347,8 +347,6 @@ func TestList(t *testing.T) {
 }
 
 func TestSave(t *testing.T) {
-	t.Skip("Save() uses PostgreSQL-specific UPSERT syntax that doesn't work with SQLite test database")
-
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
 
@@ -361,6 +359,130 @@ func TestSave(t *testing.T) {
 		assert.Panics(t, func() {
 			m.Save(context.Background(), model)
 		})
+	})
+
+	t.Run("save inserts new record", func(t *testing.T) {
+		model := &testModel{
+			ID:        100,
+			Name:      "New User",
+			Email:     "new@example.com",
+			UpdatedAt: "2024-01-01",
+		}
+
+		err := m.Save(context.Background(), model)
+		require.NoError(t, err)
+
+		// Verify it was inserted
+		retrieved := &testModel{ID: 100}
+		err = m.Get(context.Background(), retrieved)
+		require.NoError(t, err)
+		assert.Equal(t, "New User", retrieved.Name)
+	})
+
+	t.Run("save updates existing record with model tag", func(t *testing.T) {
+		model := &testModel{
+			ID:        101,
+			Name:      "Update User",
+			Email:     "update@example.com",
+			UpdatedAt: "2024-01-01",
+		}
+
+		err := m.Save(context.Background(), model)
+		require.NoError(t, err)
+
+		// Update and save again - UpdatedAt has model:"update" tag
+		model.UpdatedAt = "2024-01-02"
+
+		err = m.Save(context.Background(), model)
+		require.NoError(t, err)
+
+		// Verify the update - only UpdatedAt should change
+		retrieved := &testModel{ID: 101}
+		err = m.Get(context.Background(), retrieved)
+		require.NoError(t, err)
+		assert.Equal(t, "Update User", retrieved.Name) // Name unchanged
+		assert.Equal(t, "2024-01-02", retrieved.UpdatedAt) // UpdatedAt updated
+	})
+
+	t.Run("save updates with explicit column specification", func(t *testing.T) {
+		model := &testModel{
+			ID:        102,
+			Name:      "Explicit User",
+			Email:     "explicit@example.com",
+			UpdatedAt: "2024-01-01",
+		}
+
+		err := m.Save(context.Background(), model)
+		require.NoError(t, err)
+
+		// Update fields and explicitly specify which columns to update
+		model.Name = "Updated Name"
+		model.Email = "newemail@example.com"
+
+		err = m.Save(context.Background(), model, "name", "email")
+		require.NoError(t, err)
+
+		// Verify both fields were updated
+		retrieved := &testModel{ID: 102}
+		err = m.Get(context.Background(), retrieved)
+		require.NoError(t, err)
+		assert.Equal(t, "Updated Name", retrieved.Name)
+		assert.Equal(t, "newemail@example.com", retrieved.Email)
+	})
+
+	t.Run("save with additional columns", func(t *testing.T) {
+		model := &testModelWithMultipleTags{
+			ID:      200,
+			Name:    "Column Test",
+			Email:   "columns@example.com",
+			Status:  "active",
+			Version: 1,
+		}
+
+		err := m.Save(context.Background(), model)
+		require.NoError(t, err)
+
+		// Update status and save with explicit column
+		model.Status = "inactive"
+		model.Version = 2
+
+		err = m.Save(context.Background(), model, "status")
+		require.NoError(t, err)
+
+		// Verify the update
+		retrieved := &testModelWithMultipleTags{ID: 200}
+		err = m.Get(context.Background(), retrieved)
+		require.NoError(t, err)
+		assert.Equal(t, "inactive", retrieved.Status)
+	})
+
+	t.Run("save with multiple update tags", func(t *testing.T) {
+		model := &testModelWithMultipleTags{
+			ID:      201,
+			Name:    "Multi Tag",
+			Email:   "multitag@example.com",
+			Status:  "active",
+			Version: 1,
+		}
+
+		err := m.Save(context.Background(), model)
+		require.NoError(t, err)
+
+		// Update fields with model:"update" tags
+		model.Name = "Updated Multi Tag"
+		model.Email = "newemail@example.com"
+		model.Version = 2
+
+		err = m.Save(context.Background(), model)
+		require.NoError(t, err)
+
+		// Verify the updates
+		retrieved := &testModelWithMultipleTags{ID: 201}
+		err = m.Get(context.Background(), retrieved)
+		require.NoError(t, err)
+		assert.Equal(t, "Updated Multi Tag", retrieved.Name)
+		assert.Equal(t, "newemail@example.com", retrieved.Email)
+		assert.Equal(t, 2, retrieved.Version)
 	})
 }
 
