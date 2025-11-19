@@ -1,3 +1,5 @@
+// Package stdmodel provides a lightweight database abstraction layer built on top of Bun ORM.
+// It offers a clean, opinionated API for common CRUD operations with PostgreSQL databases.
 package stdmodel
 
 import (
@@ -11,14 +13,30 @@ import (
 	"github.com/uptrace/bun/schema"
 )
 
+// Models provides database operations for model objects.
+// It wraps a Bun database connection and provides simplified CRUD methods.
 type Models struct {
 	db *bun.DB
 }
 
+// QueryDefaulter is an interface that models can implement to define default query filters.
+// This is useful for implementing patterns like soft deletes, tenant isolation, or default ordering.
+//
+// Example:
+//
+//	type User struct {
+//	    ID      int64 `bun:"id,pk"`
+//	    Deleted bool  `bun:"deleted"`
+//	}
+//
+//	func (u *User) QueryDefault(q *bun.SelectQuery) *bun.SelectQuery {
+//	    return q.Where("deleted = ?", false)
+//	}
 type QueryDefaulter interface {
 	QueryDefault(*bun.SelectQuery) *bun.SelectQuery
 }
 
+// New creates a new Models instance with the provided Bun database connection.
 func New(db *bun.DB) (*Models, error) {
 	m := &Models{
 		db: db,
@@ -27,6 +45,16 @@ func New(db *bun.DB) (*Models, error) {
 	return m, nil
 }
 
+// Create inserts a new record into the database and scans the result back into v.
+// This allows auto-generated fields (like IDs) to be populated.
+//
+// The parameter v must be a pointer to a struct. Panics if v is not a pointer.
+//
+// Example:
+//
+//	user := &User{Name: "John"}
+//	err := models.Create(ctx, user)
+//	// user.ID is now populated
 func (m *Models) Create(ctx context.Context, v any) error {
 	if reflect.TypeOf(v).Kind() != reflect.Ptr {
 		panic("pointer expected")
@@ -39,6 +67,15 @@ func (m *Models) Create(ctx context.Context, v any) error {
 	return nil
 }
 
+// Delete removes a record from the database using its primary key.
+//
+// The parameter v must be a pointer to a struct with its primary key field populated.
+// Panics if v is not a pointer.
+//
+// Example:
+//
+//	user := &User{ID: 123}
+//	err := models.Delete(ctx, user)
 func (m *Models) Delete(ctx context.Context, v any) error {
 	if reflect.TypeOf(v).Kind() != reflect.Ptr {
 		panic("pointer expected")
@@ -51,6 +88,23 @@ func (m *Models) Delete(ctx context.Context, v any) error {
 	return nil
 }
 
+// Find retrieves a single record from the database using optional filter arguments.
+// If the model implements QueryDefaulter, those defaults are applied.
+//
+// The parameter v must be a pointer to a struct. The args parameter can be:
+//   - nil: no filtering, returns first record
+//   - struct with field tags: filters by tagged fields (e.g., `field:"email"`)
+//
+// Panics if v is not a pointer.
+//
+// Example:
+//
+//	type UserFilter struct {
+//	    Email string `field:"email"`
+//	}
+//
+//	user := &User{}
+//	err := models.Find(ctx, user, UserFilter{Email: "john@example.com"})
 func (m *Models) Find(ctx context.Context, v, args any) error {
 	if reflect.TypeOf(v).Kind() != reflect.Ptr {
 		panic("pointer expected")
@@ -74,6 +128,17 @@ func (m *Models) Find(ctx context.Context, v, args any) error {
 	return nil
 }
 
+// Get retrieves a single record from the database by its primary key.
+// If the model implements QueryDefaulter, those defaults are applied.
+//
+// The parameter v must be a pointer to a struct with its primary key field populated.
+// Panics if v is not a pointer.
+//
+// Example:
+//
+//	user := &User{ID: 123}
+//	err := models.Get(ctx, user)
+//	// user is now populated with all fields from database
 func (m *Models) Get(ctx context.Context, v any) error {
 	if reflect.TypeOf(v).Kind() != reflect.Ptr {
 		panic("pointer expected")
@@ -92,6 +157,25 @@ func (m *Models) Get(ctx context.Context, v any) error {
 	return nil
 }
 
+// List retrieves multiple records from the database using optional filter arguments.
+// If the model implements QueryDefaulter, those defaults are applied.
+//
+// The parameter vs must be a pointer to a slice of structs. The args parameter can be:
+//   - nil: no filtering, returns all records
+//   - struct with field tags: filters by tagged fields (e.g., `field:"status"`)
+//
+// Returns an error if vs is not a pointer to a slice.
+//
+// Example:
+//
+//	var users []User
+//	err := models.List(ctx, &users, nil)
+//
+//	// With filtering:
+//	type UserFilter struct {
+//	    Status string `field:"status"`
+//	}
+//	err := models.List(ctx, &users, UserFilter{Status: "active"})
 func (m *Models) List(ctx context.Context, vs any, args any) error {
 	if reflect.TypeOf(vs).Kind() != reflect.Ptr || reflect.TypeOf(vs).Elem().Kind() != reflect.Slice {
 		return errors.Errorf("pointer to slice expected")
@@ -99,7 +183,7 @@ func (m *Models) List(ctx context.Context, vs any, args any) error {
 
 	q := m.db.NewSelect().Model(vs)
 
-	v := reflect.New(reflect.TypeOf(vs).Elem()).Interface()
+	v := reflect.New(reflect.TypeOf(vs).Elem().Elem()).Interface()
 
 	if qd, ok := v.(QueryDefaulter); ok {
 		q = qd.QueryDefault(q)
@@ -116,6 +200,27 @@ func (m *Models) List(ctx context.Context, vs any, args any) error {
 	return nil
 }
 
+// Save performs an upsert operation (INSERT ... ON CONFLICT DO UPDATE).
+// If a record with the same primary key exists, it updates; otherwise it inserts.
+//
+// Fields marked with `model:"update"` tag are automatically updated on conflict.
+// Additional columns to update can be specified via the columns parameter.
+//
+// The parameter v must be a pointer to a struct. Panics if v is not a pointer.
+//
+// Example:
+//
+//	type User struct {
+//	    ID        int64  `bun:"id,pk"`
+//	    Name      string `bun:"name"`
+//	    UpdatedAt time.Time `bun:"updated_at" model:"update"`
+//	}
+//
+//	user := &User{ID: 123, Name: "John", UpdatedAt: time.Now()}
+//	err := models.Save(ctx, user) // Updates UpdatedAt on conflict
+//
+//	// Or specify additional columns to update:
+//	err := models.Save(ctx, user, "name", "email")
 func (m *Models) Save(ctx context.Context, v any, columns ...string) error {
 	if reflect.TypeOf(v).Kind() != reflect.Ptr {
 		panic("pointer expected")
@@ -146,6 +251,20 @@ func (m *Models) Save(ctx context.Context, v any, columns ...string) error {
 	return nil
 }
 
+// Select returns a Bun SelectQuery for advanced query building.
+// If the model implements QueryDefaulter, those defaults are applied.
+// Use this when you need more control than the standard CRUD methods provide.
+//
+// The parameter v must be a pointer to a struct. Panics if v is not a pointer.
+//
+// Example:
+//
+//	user := &User{}
+//	query := models.Select(user).
+//	    Where("age > ?", 18).
+//	    Order("created_at DESC").
+//	    Limit(10)
+//	err := query.Scan(ctx)
 func (m *Models) Select(v any) *bun.SelectQuery {
 	if reflect.TypeOf(v).Kind() != reflect.Ptr {
 		panic("pointer expected")
